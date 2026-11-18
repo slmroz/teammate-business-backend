@@ -1,0 +1,13 @@
+﻿using ERP.Services.Shared.CQRS;
+using ERP.Services.Shared.Search;
+using ERP.Services.Products.DTO;
+
+namespace ERP.Services.Products.Queries;
+public record GetCurrenciesQuery(
+    int Page = 1,
+    int PageSize = 20,
+    string? BaseCurrency = null,
+    string? TargetCurrency = null,
+    string SortBy = "BaseCurrency",    
+    string SortOrder = "asc")          
+    : IQuery<PagedResult<CurrencyDto>>;

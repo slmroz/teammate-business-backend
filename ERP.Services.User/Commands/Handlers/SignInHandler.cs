@@ -1,0 +1,41 @@
+﻿using ERP.Model.Model;
+using ERP.Services.Shared.CQRS;
+using ERP.Services.Shared.Security;
+using ERP.Services.User.Exceptions;
+using Microsoft.EntityFrameworkCore;
+
+namespace ERP.Services.User.Commands.Handlers;
+internal sealed class SignInHandler : ICommandHandler<SignInCommand>
+{
+    private readonly IAuthenticator _authenticator;
+    private readonly IPasswordManager _passwordManager;
+    private readonly ITokenStorage _tokenStorage;
+    private readonly ErpContext _dbContext;
+
+    public SignInHandler(ErpContext dbContext, IAuthenticator authenticator, IPasswordManager passwordManager,
+        ITokenStorage tokenStorage)
+    {
+        _authenticator = authenticator;
+        _passwordManager = passwordManager;
+        _tokenStorage = tokenStorage;
+        _dbContext = dbContext;
+    }
+
+    public async Task HandleAsync(SignInCommand command)
+    {
+        var user = await _dbContext.Users.FirstOrDefaultAsync(x => x.Email == command.Email).ConfigureAwait(false);
+        if (user is null)
+        {
+            throw new InvalidCredentialsException();
+        }
+
+        if (!_passwordManager.Validate(command.Password, user.Password))
+        {
+            throw new InvalidCredentialsException();
+        }
+
+        var role = (Model.Enum.UserRole)user.Role;
+        var jwt = _authenticator.CreateToken(user.Id, role.ToString(), user.Email);
+        _tokenStorage.Set(jwt);
+    }
+}

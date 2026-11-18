@@ -1,0 +1,31 @@
+﻿using System;
+using System.Collections.Generic;
+
+namespace ERP.Model.Model;
+
+public partial class Contact
+{
+    public int Id { get; set; }
+
+    public int? CustomerId { get; set; }
+
+    public string? FirstName { get; set; }
+
+    public string? LastName { get; set; }
+
+    public string? PhoneNo { get; set; }
+
+    public string? Email { get; set; }
+
+    public DateTime? CreatedAt { get; set; }
+
+    public DateTime? LastUpdatedAt { get; set; }
+
+    public DateTime? RemovedAt { get; set; }
+
+    public virtual Customer? Customer { get; set; }
+
+    public virtual ICollection<Lead> Leads { get; set; } = new List<Lead>();
+
+    public virtual ICollection<Quote> Quotes { get; set; } = new List<Quote>();
+}

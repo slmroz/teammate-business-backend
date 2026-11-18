@@ -1,0 +1,222 @@
+using ERP.Services.Shared.CommonServices;
+using ERP.Services.Shared.CQRS;
+using ERP.Services.Shared.Search;
+using ERP.Services.Shared.Security;
+using ERP.Services.User.Commands;
+using ERP.Services.User.DTO;
+using ERP.Services.User.Exceptions;
+using ERP.Services.User.Queries;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Swashbuckle.AspNetCore.Annotations;
+
+namespace ERP.Controllers;
+
+[ApiController]
+[Route("[controller]")]
+public class UserController : ControllerBase
+{
+    private readonly IQueryHandler<GetUsersQuery, PagedResult<UserDto>> _getUsersHandler;
+    private readonly IQueryHandler<GetUserQuery, UserDto> _getUserHandler;
+    private readonly ICommandHandler<SignUpCommand> _signUpHandler;
+    private readonly ICommandHandler<SignInCommand> _signInHandler;
+    private readonly ICommandHandler<UpdateDarkModeCommand> _updateDarkModeHandler;
+    private readonly ICommandHandler<UpdateUserCommand> _updateUserHandler;
+    private readonly ICommandHandler<ChangePasswordCommand> _changePasswordHandler;
+    private readonly ICommandHandler<ForgotPasswordCommand> _forgotPasswordHandler;
+    private readonly ICommandHandler<ResetPasswordCommand> _resetPasswordHandler;
+    private readonly ITokenStorage _tokenStorage;
+
+    private readonly IConfiguration _configuration;
+    private readonly IEmailService _emailService;
+
+    public UserController(ICommandHandler<SignUpCommand> signUpHandler,
+        ICommandHandler<SignInCommand> signInHandler,
+        ICommandHandler<UpdateDarkModeCommand> updateDarkModeHandler,
+        ICommandHandler<UpdateUserCommand> updateUserHandler,
+        ICommandHandler<ChangePasswordCommand> changePasswordHandler,
+        ICommandHandler<ForgotPasswordCommand> forgotPasswordHandler,
+        ICommandHandler<ResetPasswordCommand> resetPasswordHandler,
+        IQueryHandler<GetUsersQuery, PagedResult<UserDto>> getUsersHandler,
+        IQueryHandler<GetUserQuery, UserDto> getUserHandler,
+        ITokenStorage tokenStorage,
+        IConfiguration configuration,
+        IEmailService emailService)
+    {
+        _signUpHandler = signUpHandler;
+        _signInHandler = signInHandler;
+        _updateDarkModeHandler = updateDarkModeHandler;
+        _updateUserHandler = updateUserHandler;
+        _changePasswordHandler = changePasswordHandler;
+        _forgotPasswordHandler = forgotPasswordHandler;
+        _resetPasswordHandler = resetPasswordHandler;
+        _getUsersHandler = getUsersHandler;
+        _getUserHandler = getUserHandler;
+        _tokenStorage = tokenStorage;
+
+        _configuration = configuration;
+        _emailService = emailService;
+    }
+
+    //[Authorize(Policy = "is-admin")]
+    [Authorize(Roles = "Admin")]
+    [HttpGet("{userId:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserDto>> Get(int userId)
+    {
+        var user = await _getUserHandler.HandleAsync(new GetUserQuery { UserId = userId });
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        return user;
+    }
+
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [HttpGet("me")]
+    public async Task<ActionResult<UserDto>> Get()
+    {
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
+
+        var user = await _getUserHandler.HandleAsync(new GetUserQuery { UserId = userId }).ConfigureAwait(false);
+
+        return user;
+    }
+
+    [Authorize]
+    [HttpPut("me/dark-mode")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult> UpdateDarkMode([FromBody] UpdateDarkModeRequest request)
+    {
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
+
+        await _updateDarkModeHandler.HandleAsync(new UpdateDarkModeCommand(userId, request.Enabled));
+        return NoContent();
+    }
+
+    [HttpGet]
+    [SwaggerOperation("Get paginated list of users with search and filters")]
+    [ProducesResponseType(typeof(PagedResult<UserDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    //[Authorize(Policy = "is-admin")]
+    //[Authorize(Roles = "Admin")]
+    public async Task<ActionResult<PagedResult<UserDto>>> GetList(
+    [FromQuery] int page = 1,
+    [FromQuery] int pageSize = 20,
+    [FromQuery] string? search = null,
+    [FromQuery] int? role = null,
+    [FromQuery] string sortBy = "lastname",
+    [FromQuery] string sortOrder = "asc")
+    {
+        var query = new GetUsersQuery(page, pageSize, search, role, sortBy, sortOrder);
+        var result = await _getUsersHandler.HandleAsync(query);
+        return Ok(result);
+    }
+
+    [HttpPost]
+    [SwaggerOperation("Create the user account")]
+    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> Post(SignUpCommand command)
+    {
+        await _signUpHandler.HandleAsync(command);
+        return CreatedAtAction(nameof(Get), new { command.Email }, null);
+    }
+
+    [HttpPut("{id:int}")]
+    [SwaggerOperation("Update the user account")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> Put(int id, UpdateUserCommand command)
+    {
+        if (id != command.Id)
+            return BadRequest();
+
+        await _updateUserHandler.HandleAsync(command);
+        return NoContent();
+    }
+
+    [HttpPost("sign-in")]
+    [SwaggerOperation("Sign in the user and return the JSON Web Token")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<JwtDto>> Post(SignInCommand command)
+    {
+        try
+        {
+            await _signInHandler.HandleAsync(command);
+        }
+        catch (InvalidCredentialsException)
+        {
+            return Unauthorized();
+        }
+
+        var jwt = _tokenStorage.Get();
+        //_logger.LogInformation("Token {token} assigned in successfully.", jwt);
+        return jwt;
+    }
+
+    // Controller method
+    [HttpPut("change-password")]
+    [SwaggerOperation("Change the user password")]
+    [Authorize]  // Assuming JWT or similar auth to identify user
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ChangePassword(ChangePasswordCommand command)
+    {
+        await _changePasswordHandler.HandleAsync(command);
+        return NoContent();
+    }
+
+    [HttpPost("forgot-password")]
+    [SwaggerOperation("Request password reset via email")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ForgotPassword(ForgotPasswordCommand command)
+    {
+        await _forgotPasswordHandler.HandleAsync(command);
+        return Ok();  // Don't reveal if email exists for security
+    }
+
+    [HttpPost("reset-password")]
+    [SwaggerOperation("Reset password using token")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> ResetPassword(ResetPasswordCommand command)
+    {
+        await _resetPasswordHandler.HandleAsync(command);
+        return NoContent();
+    }
+
+    private bool TryGetCurrentUserId(out int userId)
+        => int.TryParse(User.FindFirst("sub")?.Value, out userId) && userId > 0;
+
+    //[HttpGet("test-email-config")]
+    //public async Task<IActionResult> TestConfig([FromServices] IEmailService email)
+    //{
+    //    var password = _configuration["EmailSettings:Password"];
+    //    var exception = "All fine";
+    //    try
+    //    {
+    //        await _emailService.SendAsync("slmroz@wp.pl", "PasswordReset", new { UserName = "Slawek", ResetUrl = "https://teammate.pl" });
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        exception = ex.Message;
+    //    }
+    //    return Ok($"Email password configured: {password}. Exception: {exception}");
+    //}
+}
+
+public sealed record UpdateDarkModeRequest(bool Enabled);

@@ -1,0 +1,11 @@
+dotnet core webapi C# with the following projects:
+
+Api (dependency: Infrastructure)
+Infrastructure (dependency: Services.Customer, Services.User)
+Model
+Services.Abstractions (dependency: Model
+Services.Customer (dependency: Services.Anstractions)
+Services.User (dependency: Services.Anstractions)
+
+I need to implement some common services, like IEmailService or IPdfService to be used by other service projects.
+As an experienced application architect - please advice the best approach.

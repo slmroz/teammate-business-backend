@@ -1,0 +1,111 @@
+Zbuduj proszę CQRS dla:
+
+CREATE TABLE Sales.Quote (
+    Id int PRIMARY KEY IDENTITY,
+    
+    -- Relacje
+--    OpportunityId int NOT NULL REFERENCES Crm.Opportunities(Id),  -- Z szansy sprzedaży
+    CustomerId int NOT NULL REFERENCES Crm.Customer(Id),          -- Klient
+    PriceListId int NOT NULL REFERENCES Catalog.PriceList(Id),    -- Lista cen
+    ContactId int NULL REFERENCES Crm.Contact(Id),                -- Kontakt do oferty
+    
+    -- Dane oferty
+    QuoteNumber nvarchar(50) UNIQUE,           -- Q-2026-001
+    Subject nvarchar(200) NOT NULL,            -- "Oferta hamulce Toyota"
+    Description nvarchar(1000),
+    QuoteStatusId int references Dictionary.QuoteStatus(id) DEFAULT 1,       -- Draft/Sent/Negotiated/Accepted/Rejected
+    ValidUntil date NOT NULL,
+    
+    -- Finanse
+    Subtotal decimal(18,2) DEFAULT 0,
+    TaxAmount decimal(18,2) DEFAULT 0,
+    TotalAmount decimal(18,2) NOT NULL,
+    DiscountPercentage decimal(5,2) DEFAULT 0,
+    
+    -- Terminy
+    IssueDate date DEFAULT GETDATE(),
+    DueDate date,
+    
+    -- Audit
+    CreatedAt datetime2 DEFAULT GETDATE(),
+    CreatedBy int NOT NULL REFERENCES Auth.[User](Id),
+    LastUpdatedAt datetime2,
+    LastUpdatedBy int REFERENCES Auth.[User](Id),
+    RemovedAt datetime2 NULL,
+    RemovedBy int REFERENCES Auth.[User](Id)
+);
+
+CREATE TABLE Sales.QuoteItem (
+    Id int PRIMARY KEY IDENTITY,
+    
+    -- Relacje
+    QuoteId int NOT NULL REFERENCES Sales.Quote(Id) ON DELETE CASCADE,
+    ProductId int NOT NULL REFERENCES Catalog.Product(Id),
+    ProductGroupId int NULL REFERENCES Catalog.ProductGroup(Id),  -- Grupa dla filtrowania
+    
+    -- Pozycja
+    LineNumber int NOT NULL DEFAULT 1,     -- 1,2,3... kolejność
+    Quantity decimal(12,3) NOT NULL DEFAULT 1,
+    UnitPrice decimal(18,2) NOT NULL,
+    DiscountPercentage decimal(5,2) DEFAULT 0,
+    
+    -- Obliczenia
+    LineTotal decimal(18,2) NOT NULL,
+    
+    -- Opis
+    Description nvarchar(500),
+    
+    -- Audit
+    CreatedAt datetime2 DEFAULT GETDATE(),
+    CreatedBy int NOT NULL REFERENCES Auth.[User](Id),
+    LastUpdatedAt datetime2,
+    LastUpdatedBy int REFERENCES Auth.[User](Id),
+    RemovedAt datetime2 NULL,
+    RemovedBy int REFERENCES Auth.[User](Id)
+);
+
+Uwzględnij opcję sortowania i filtrowania w komendzie pobierania listy.
+Przy komendzie add - upewnij się, że handler nie zwraca int, tylko zapisuje go jako właściwość komendy. 
+Aby była możliwość nadpisania Id w komendzie - uczyń ją klasą, nie rekordem.
+
+Oto stosowane przeze mnie interfejsy:
+
+public interface ICommandHandler<in TCommand> where TCommand : class, ICommand
+{
+    Task HandleAsync(TCommand command);
+}
+
+public interface IQueryHandler<in TQuery, TResult> where TQuery : class, IQuery<TResult>
+{
+    Task<TResult> HandleAsync(TQuery query);
+}
+
+public interface IClock // użyj proszę podczas przypisywania bieżącej daty
+{
+    DateTime Current();
+}
+
+Nazwij EF context: ErpContext
+
+
+
+
+UNIT TESTS
+
+zamiast 
+return new PagedResult<Dto>(items, total, query.Page, query.PageSize)
+zwróć wynik wyszukiwania w następujący sposób
+
+        return new PagedResult<Dto>
+        {
+            TotalCount = total,
+            Items = items
+        };
+Udostępnij proszę pełny kod, bez skracania analogicznych fragmentów.		
+
+
+Zaktualizowałem openapi.json, dodano CRUD dla PriceList i PriceListItem. Dodaj proszę obsługę tego CRUD do aplikacji, cennik w menu jako podopcja w "Catalog".
+W opcji dodania nowego cennika uwzględnij proszę wybór waluty z listy rozwijalnej oraz opcję wypełnienia nowopowstałego cennika pozycjami z listy produktów
+(parametr fillItems). Zarządzanie pozycjami niech ma miejsce tylko z poziomu wybranego cennika.
+
+W widoku grida dodaj proszę przycisk "Refresh", po kliknięciu pobierający ponownie listę, tym razem z parametrem "refresh" ustawionym na True.
